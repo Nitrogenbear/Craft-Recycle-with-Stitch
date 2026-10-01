@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Stitch Jobs</string>
+    <string name="launch_url">https://nitrogenbear.github.io/Craft-Recycle-with-Stitch/</string>
+    <!-- Must match /.well-known/assetlinks.json on nitrogenbear.github.io to hide the address bar. -->
+    <string name="asset_statements" translatable="false">
+        [{
+            \"relation\": [\"delegate_permission/common.handle_all_urls\"],
+            \"target\": {\"namespace\": \"web\", \"site\": \"https://nitrogenbear.github.io\"}
+        }]
+    </string>
+</resources>

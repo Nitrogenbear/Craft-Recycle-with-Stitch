@@ -1,0 +1,60 @@
+# Builds the Android app (StitchJobs.apk) and publishes it on the "Android app" release.
+# Needs one repository secret: ANDROID_KEYSTORE (base64 of the .p12 signing key).
+name: Build Android app
+
+on:
+  push:
+    branches: [main]
+    paths: ['android/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_PATH: ${{ github.workspace }}/release.p12
+      # The key file itself is the secret; this password only unlocks it.
+      KEYSTORE_PASSWORD: stitchjobs-keystore
+      VERSION_CODE: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check signing key secret
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE" ]; then
+            echo "::error::Add the ANDROID_KEYSTORE secret (Settings > Secrets and variables > Actions) and re-run."
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE" | base64 -d > "$KEYSTORE_PATH"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build signed APK
+        run: gradle -p android assembleRelease --no-daemon
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk StitchJobs.apk
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-app
+          name: Android app
+          make_latest: true
+          body: |
+            **Stitch Jobs for Android** (build ${{ github.run_number }})
+
+            On the tablet, download **StitchJobs.apk** below, open it, and allow Chrome to install apps if asked.
+            The app opens the latest version of https://nitrogenbear.github.io/Craft-Recycle-with-Stitch/ full-screen, so most updates need no reinstall.
+          files: StitchJobs.apk
