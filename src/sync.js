@@ -149,14 +149,29 @@ export function useCloudSync(state, update) {
       );
       unsubs.push(fs.onSnapshot(itemsQ, (snap) => {
         const incoming = [];
+        const m = meta.current;
+        const local = stateRef.current;
         for (const ch of snap.docChanges()) {
           if (ch.type === 'removed') continue;
           const doc = ch.doc;
           if (doc.metadata.hasPendingWrites) continue; // our own write echoing back
           const d = doc.data();
           const ts = d.updatedAt?.toMillis?.() || 0;
-          if (ts > meta.current.cursor) meta.current.cursor = ts;
+          if (ts > m.cursor) m.cursor = ts;
           if (inFlight.current[doc.id]) continue; // our newer local version is on its way
+
+          const known = m.confirmed[doc.id];
+          // Identical to what we last synced (e.g. our own save coming back): nothing to do.
+          if (!d.deleted && known === `${d.kind}|${hash(d.data)}`) continue;
+          if (d.deleted && known === undefined) {
+            if (![...local.jobs, ...local.tasks].some((x) => x.id === doc.id)) continue;
+          }
+          // This device has changes to the item that haven't been sent yet: keep them (they're sent next).
+          if (known !== undefined) {
+            const mine = (d.kind === 'task' ? local.tasks : local.jobs).find((x) => x.id === doc.id);
+            const mineHash = mine ? `${d.kind}|${hash(clean(mine))}` : undefined;
+            if (mineHash !== known) continue;
+          }
           incoming.push({ id: doc.id, ...d });
         }
         if (incoming.length) {

@@ -1,8 +1,8 @@
 rules_version = '2';
 
 // Only people listed in workspaces/stitch.members can read or change the data.
-// The owner (the first account to sign in) creates the workspace; OWNER_EMAIL must be
-// that Google account's address in lower case. Members can add others in the app's Settings.
+// The owner (Carla) creates the workspace on her first sign-in; nobody else can.
+// Members can add others in the app's Settings.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -21,7 +21,7 @@ service cloud.firestore {
     match /workspaces/stitch {
       allow get: if signedIn() && (!exists(wsPath()) || isMember());
       allow create: if signedIn()
-        && myEmail() == 'OWNER_EMAIL'
+        && myEmail() == 'yakelin4256@gmail.com'
         && request.resource.data.members == [myEmail()];
       allow update: if isMember()
         && request.resource.data.members is list
