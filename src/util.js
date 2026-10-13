@@ -84,6 +84,18 @@ export function deadlineLabel(job, today = todayISO()) {
   return `${left}d left`;
 }
 
+// --- Prices ---
+// Each garment can have its own price; the job total is their sum.
+// Jobs priced as a single amount (no garment prices) keep job.price as the total.
+export const hasValue = (v) => v !== '' && v != null && !isNaN(Number(v));
+export const priceOf = (v) => (hasValue(v) ? Math.round(Number(v) * 100) / 100 : '');
+export const pricedByGarment = (job) => job.garments.some((g) => hasValue(g.price));
+export function garmentTotal(garments) {
+  const priced = garments.filter((g) => hasValue(g.price));
+  return priced.length ? Math.round(priced.reduce((s, g) => s + Number(g.price), 0) * 100) / 100 : '';
+}
+export const jobTotal = (job) => (pricedByGarment(job) ? garmentTotal(job.garments) : priceOf(job.price));
+
 export const money = (n) => (n === '' || n == null || isNaN(n) ? '' : `£${Number(n).toFixed(2)}`);
 
 // UK numbers -> international digits for wa.me links (07700 900123 -> 447700900123)

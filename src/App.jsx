@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { mapGarment, mapJob, useAppState } from './store.js';
-import { deadlineState, todayISO, uid } from './util.js';
+import { mapGarment, mapJob, migrate, saveState, useAppState } from './store.js';
+import { useCloudSync } from './sync.js';
+import { deadlineState, garmentTotal, priceOf, pricedByGarment, todayISO, uid } from './util.js';
 import * as sheets from './sheets.js';
 import { AppCtx } from './ui.jsx';
 import Dashboard from './views/Dashboard.jsx';
@@ -19,6 +20,15 @@ function parseHash() {
 }
 export const go = (path) => { location.hash = '#/' + path; };
 
+// Next ticket number: never reuse a number already on a job (matters when two devices add jobs).
+function nextTicketNumber(s) {
+  const prefix = s.settings.ticketPrefix;
+  const used = s.jobs
+    .map((j) => (j.ticket.startsWith(prefix) ? parseInt(j.ticket.slice(prefix.length), 10) : NaN))
+    .filter((n) => !isNaN(n));
+  return Math.max(Number(s.settings.nextTicket) || 1, used.length ? Math.max(...used) + 1 : 1);
+}
+
 const newGarment = (n) => ({ id: uid(), label: `Garment ${n}`, done: false, completedAt: null, runningSince: null, logs: [] });
 
 function stopAll(job, now) {
@@ -33,7 +43,8 @@ function stopAll(job, now) {
 }
 
 export default function App() {
-  const [state, update] = useAppState();
+  const [state, update, loadError] = useAppState();
+  const sync = useCloudSync(state, update);
   const [route, setRoute] = useState(parseHash);
   const [editing, setEditing] = useState(null); // job object, or {} for new
   const [contact, setContact] = useState(null); // { jobId, garmentId }
@@ -97,37 +108,58 @@ export default function App() {
 
     saveJob(form) {
       const savedId = form.id || uid();
+      // form.garments: [{ id?, label, price }] — the garment list edited in the form
+      const rows = form.garments.length ? form.garments : [{ label: 'Garment 1', price: '' }];
+      const withPrice = (job) => ({ ...job, price: pricedByGarment(job) ? garmentTotal(job.garments) : priceOf(form.price) });
       update((s) => {
-        const count = Math.max(1, Number(form.garmentCount) || 1);
         if (!form.id) {
-          const ticket = form.ticket?.trim() || `${s.settings.ticketPrefix}${String(s.settings.nextTicket).padStart(4, '0')}`;
-          const job = {
+          const n = nextTicketNumber(s);
+          const ticket = form.ticket?.trim() || `${s.settings.ticketPrefix}${String(n).padStart(4, '0')}`;
+          const job = withPrice({
             id: savedId, ticket, createdAt: Date.now(), status: form.status || 'New',
             client: form.client, startDate: form.startDate, dueDate: form.dueDate, finishedDate: null, collectedDate: null,
-            service: form.service, description: form.description, instructions: form.instructions, price: form.price,
-            garments: Array.from({ length: count }, (_, i) => newGarment(i + 1)),
+            service: form.service, description: form.description, instructions: form.instructions,
+            garments: rows.map((r, i) => ({ ...newGarment(i + 1), label: r.label.trim() || `Garment ${i + 1}`, price: priceOf(r.price) })),
             contactLog: [], synced: false,
-          };
+          });
           const auto = !form.ticket?.trim();
-          return { ...s, jobs: [job, ...s.jobs], settings: auto ? { ...s.settings, nextTicket: s.settings.nextTicket + 1 } : s.settings };
+          return { ...s, jobs: [job, ...s.jobs], settings: auto ? { ...s.settings, nextTicket: n + 1 } : s.settings };
         }
         return mapJob(s, form.id, (j) => {
-          let garments = j.garments;
-          if (count > garments.length) garments = [...garments, ...Array.from({ length: count - garments.length }, (_, i) => newGarment(garments.length + i + 1))];
-          else if (count < garments.length) {
-            // only trim trailing garments with no time logged
-            const keep = [...garments];
-            while (keep.length > count && !keep[keep.length - 1].logs.length && !keep[keep.length - 1].runningSince) keep.pop();
-            garments = keep;
-          }
-          return {
+          const byId = new Map(j.garments.map((g) => [g.id, g]));
+          const garments = rows.map((r, i) => {
+            const existing = r.id && byId.get(r.id);
+            const base = existing || newGarment(i + 1);
+            return { ...base, label: r.label.trim() || base.label, price: priceOf(r.price) };
+          });
+          // never drop a garment that has time logged against it
+          const kept = new Set(garments.map((g) => g.id));
+          for (const g of j.garments) if (!kept.has(g.id) && (g.logs.length || g.runningSince)) garments.push(g);
+          return withPrice({
             ...j, ticket: form.ticket?.trim() || j.ticket, client: form.client, startDate: form.startDate, dueDate: form.dueDate,
-            service: form.service, description: form.description, instructions: form.instructions, price: form.price, garments,
-          };
+            service: form.service, description: form.description, instructions: form.instructions, garments,
+          });
         });
       });
       setEditing(null);
       return savedId;
+    },
+
+    // Whole-job price (used when garments aren't priced individually)
+    setPrice(id, price) {
+      const value = priceOf(price);
+      if (value !== '' && value < 0) return;
+      update((s) => mapJob(s, id, (j) => ({ ...j, price: value })));
+    },
+
+    // Per-garment price; the job's price is kept as the total of its garments
+    setGarmentPrice(jobId, gid, price) {
+      const value = priceOf(price);
+      if (value !== '' && value < 0) return;
+      update((s) => mapJob(s, jobId, (j) => {
+        const job = mapGarment(j, gid, (g) => ({ ...g, price: value }));
+        return { ...job, price: pricedByGarment(job) ? garmentTotal(job.garments) : '' };
+      }));
     },
 
     deleteJob(id) {
@@ -208,7 +240,10 @@ export default function App() {
     },
 
     removeGarment(jobId, gid) {
-      update((s) => mapJob(s, jobId, (j) => ({ ...j, garments: j.garments.filter((g) => g.id !== gid) })));
+      update((s) => mapJob(s, jobId, (j) => {
+        const job = { ...j, garments: j.garments.filter((g) => g.id !== gid) };
+        return pricedByGarment(j) ? { ...job, price: garmentTotal(job.garments) } : job;
+      }));
     },
 
     addContactNote(jobId, note) {
@@ -236,6 +271,7 @@ export default function App() {
     },
   }), [toast, update, runSync]);
 
+  if (loadError) return <LoadError message={loadError} onRestore={(data) => saveState(migrate(data)).then(() => location.reload())} />;
   if (!state) return <div className="loading">Loading…</div>;
 
   const warnings = state.jobs.filter((j) => ['overdue', 'close'].includes(deadlineState(j)));
@@ -251,7 +287,7 @@ export default function App() {
   ];
 
   return (
-    <AppCtx.Provider value={{ state, actions, syncing }}>
+    <AppCtx.Provider value={{ state, actions, syncing, sync }}>
       <div className="app">
         <header className="topbar">
           <a className="brand" href="#/dashboard">
@@ -264,6 +300,7 @@ export default function App() {
             ))}
           </nav>
           <div className="topbar-actions">
+            <SyncBadge sync={sync} />
             {running && (
               <a className="running-chip" href={`#/job/${running.id}`} title="Timer running">
                 <span className="pulse" /> {running.ticket}
@@ -314,5 +351,48 @@ export default function App() {
         </div>
       </div>
     </AppCtx.Provider>
+  );
+}
+
+const SYNC_LABELS = {
+  synced: ['☁ Synced', 'ok'],
+  pending: ['☁ Saving…', 'pending'],
+  connecting: ['☁ Connecting…', 'pending'],
+  offline: ['☁ Offline', 'offline'],
+  'signed-out': ['☁ Not syncing', 'offline'],
+  'not-member': ['☁ No access', 'bad'],
+  error: ['☁ Sync error', 'bad'],
+};
+
+function SyncBadge({ sync }) {
+  if (!sync.configured) return null;
+  const [label, cls] = SYNC_LABELS[sync.status] || SYNC_LABELS.connecting;
+  const title = sync.status === 'offline'
+    ? 'No connection. Changes are saved on this device and will sync when back online.'
+    : sync.status === 'pending' ? `${sync.pendingCount} change(s) being sent` : sync.error || label;
+  return <a className={`sync-badge ${cls}`} href="#/settings" title={title}>{label}</a>;
+}
+
+// Shown if saved data can't be read. Nothing is saved in this state, so existing data can't be overwritten.
+function LoadError({ message, onRestore }) {
+  const restore = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    file.text()
+      .then((t) => {
+        if (confirm('Replace the data on this device with this backup file?')) return onRestore(JSON.parse(t));
+      })
+      .catch((err) => alert(`Could not read backup: ${err.message}`));
+  };
+  return (
+    <div className="load-error">
+      <h1>Couldn’t open your saved jobs</h1>
+      <p>The app couldn’t read the data stored on this device ({message}). <strong>Nothing has been changed or deleted</strong>, and the app won’t save anything until this is fixed.</p>
+      <p>Try closing the app completely and opening it again. If you use sync, your jobs are also safe online.</p>
+      <div className="btn-row">
+        <button className="btn primary" onClick={() => location.reload()}>Try again</button>
+        <label className="btn">Restore from a backup file…<input type="file" accept=".json,application/json" hidden onChange={restore} /></label>
+      </div>
+    </div>
   );
 }

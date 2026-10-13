@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Field, Modal, useApp } from '../ui.jsx';
-import { SERVICES, addDaysISO, todayISO } from '../util.js';
+import { SERVICES, addDaysISO, garmentTotal, hasValue, priceOf, pricedByGarment, todayISO } from '../util.js';
 
 const blankClient = { name: '', phone: '', email: '', address: '', bestTime: '' };
 
@@ -8,13 +8,23 @@ export default function JobForm({ job, prefill, onClose, onSave }) {
   const { state } = useApp();
   const today = todayISO();
   const [f, setF] = useState(() => job
-    ? { ...job, client: { ...blankClient, ...job.client }, garmentCount: job.garments.length }
+    ? {
+        ...job, client: { ...blankClient, ...job.client },
+        price: pricedByGarment(job) ? '' : job.price,
+        garments: job.garments.map((g) => ({ id: g.id, label: g.label, price: hasValue(g.price) ? String(g.price) : '' })),
+      }
     : {
         ticket: '', client: { ...blankClient, ...(prefill?.client || {}) }, startDate: today, dueDate: addDaysISO(today, 7),
-        service: 'Alterations', description: '', instructions: '', price: '', garmentCount: 1,
+        service: 'Alterations', description: '', instructions: '', price: '', garments: [{ _k: Math.random(), label: 'Garment 1', price: '' }],
       });
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   const setClient = (k, v) => setF((x) => ({ ...x, client: { ...x.client, [k]: v } }));
+  const setGarment = (i, k, v) => setF((x) => ({ ...x, garments: x.garments.map((g, j) => (j === i ? { ...g, [k]: v } : g)) }));
+  const addGarmentRow = () => setF((x) => ({ ...x, garments: [...x.garments, { _k: Math.random(), label: `Garment ${x.garments.length + 1}`, price: '' }] }));
+  const removeGarmentRow = (i) => setF((x) => ({ ...x, garments: x.garments.filter((_, j) => j !== i) }));
+  const byGarment = f.garments.some((g) => hasValue(g.price) && g.price !== '');
+  const total = byGarment ? garmentTotal(f.garments) : priceOf(f.price);
+  const loggedIds = new Set((job?.garments || []).filter((g) => g.logs.length || g.runningSince).map((g) => g.id));
 
   // Repeat clients: most recent details for each name
   const clients = useMemo(() => {
@@ -65,7 +75,7 @@ export default function JobForm({ job, prefill, onClose, onSave }) {
 
         <fieldset>
           <legend>Job</legend>
-          <div className="grid-3">
+          <div className="grid-2">
             <Field label="Ticket / job number" hint={job ? '' : `Leave blank for ${nextTicket}`}>
               <input value={f.ticket} placeholder={job ? '' : nextTicket} onChange={(e) => set('ticket', e.target.value)} />
             </Field>
@@ -74,17 +84,11 @@ export default function JobForm({ job, prefill, onClose, onSave }) {
                 {SERVICES.map((s) => <option key={s}>{s}</option>)}
               </select>
             </Field>
-            <Field label="Number of garments">
-              <input type="number" min={1} max={50} value={f.garmentCount} onChange={(e) => set('garmentCount', e.target.value)} />
-            </Field>
             <Field label="Start date">
               <input type="date" required value={f.startDate} onChange={(e) => set('startDate', e.target.value)} />
             </Field>
             <Field label="Hand-back date *">
               <input type="date" required value={f.dueDate} min={f.startDate} onChange={(e) => set('dueDate', e.target.value)} />
-            </Field>
-            <Field label="Price (£)">
-              <input type="number" min={0} step="0.5" value={f.price} placeholder="e.g. 18" onChange={(e) => set('price', e.target.value)} />
             </Field>
           </div>
           <div className="quick-dates">
@@ -99,6 +103,42 @@ export default function JobForm({ job, prefill, onClose, onSave }) {
           <Field label="Special instructions">
             <textarea rows={2} value={f.instructions} placeholder="e.g. Customer prefers a narrow hem" onChange={(e) => set('instructions', e.target.value)} />
           </Field>
+        </fieldset>
+
+        <fieldset>
+          <legend>Garments & prices</legend>
+          <ul className="garment-rows">
+            {f.garments.map((g, i) => (
+              <li key={g.id || g._k}>
+                <input value={g.label} aria-label={`Garment ${i + 1} name`} placeholder={`Garment ${i + 1}, e.g. Blue jeans – hem`}
+                  onChange={(e) => setGarment(i, 'label', e.target.value)} />
+                <span className="price-field">
+                  <span className="price-symbol">£</span>
+                  <input type="number" inputMode="decimal" min={0} step="0.5" value={g.price} placeholder="Price" aria-label={`Garment ${i + 1} price`}
+                    onChange={(e) => setGarment(i, 'price', e.target.value)} />
+                </span>
+                {f.garments.length > 1 && !loggedIds.has(g.id) && (
+                  <button type="button" className="icon-btn" title="Remove garment" onClick={() => removeGarmentRow(i)}>✕</button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <button type="button" className="btn small" onClick={addGarmentRow}>+ Add garment</button>
+          <div className="form-total">
+            {byGarment ? (
+              <span>Job total <strong>£{Number(total || 0).toFixed(2)}</strong> <span className="muted small">(sum of garment prices)</span></span>
+            ) : (
+              <label className="price-whole">
+                <span>Or one price for the whole job</span>
+                <span className="price-field">
+                  <span className="price-symbol">£</span>
+                  <input type="number" inputMode="decimal" min={0} step="0.5" value={f.price} placeholder="e.g. 18" aria-label="Whole job price"
+                    onChange={(e) => set('price', e.target.value)} />
+                </span>
+              </label>
+            )}
+          </div>
+          <p className="muted small">Prices can be added or changed later from the job page too.</p>
         </fieldset>
 
         <div className="form-actions">

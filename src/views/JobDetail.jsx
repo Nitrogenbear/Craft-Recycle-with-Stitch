@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { DeadlineTag, Field, Modal, StatusPill, useApp, useNow } from '../ui.jsx';
-import { STATUSES, deadlineState, fmtDate, fmtDateTime, fmtDuration, fmtTime, garmentMs, isRunning, jobMs, money, todayISO } from '../util.js';
+import { DeadlineTag, Field, GarmentPrice, Modal, PriceEditor, StatusPill, useApp, useNow } from '../ui.jsx';
+import { STATUSES, deadlineState, fmtDate, fmtDateTime, fmtDuration, fmtTime, garmentMs, isRunning, jobMs, todayISO } from '../util.js';
 import TaskList from './TaskList.jsx';
 
 export default function JobDetail({ job }) {
@@ -27,6 +27,7 @@ export default function JobDetail({ job }) {
           <div className="muted mono">{job.ticket} · {job.service}</div>
           <h1>{job.client.name}</h1>
           <div className="job-head-meta">
+            <PriceEditor job={job} size="large" />
             <StatusPill status={job.status} />
             <DeadlineTag job={job} />
             <span className="muted">Started {fmtDate(job.startDate)} · Hand-back {fmtDate(job.dueDate)}{job.finishedDate ? ` · Finished ${fmtDate(job.finishedDate)}` : ''}</span>
@@ -44,12 +45,14 @@ export default function JobDetail({ job }) {
       {allDone && !finished && (
         <div className="banner ok">
           All garments done.
+          {(job.price === '' || job.price == null) && <span className="banner-price">Price: <PriceEditor job={job} /></span>}
           <button className="btn primary" onClick={() => actions.setStatus(job.id, 'Ready for Pickup')}>Mark ready for pickup →</button>
         </div>
       )}
       {job.status === 'Ready for Pickup' && (
         <div className="banner purple">
           Ready for pickup — {job.contactLog.length ? `last contact: ${job.contactLog[job.contactLog.length - 1].note}` : 'client not contacted yet'}.
+          {(job.price === '' || job.price == null) && <span className="banner-price">Price: <PriceEditor job={job} /></span>}
           <button className="btn" onClick={() => actions.openContact(job.id)}>📞 Contact client</button>
           <button className="btn primary" onClick={() => actions.setStatus(job.id, 'Completed')}>✓ Collected</button>
         </div>
@@ -58,7 +61,7 @@ export default function JobDetail({ job }) {
       <div className="detail-grid">
         <section className="card">
           <header className="card-head">
-            <h2>Garments & time</h2>
+            <h2>Garments, prices & time</h2>
             <span className="total-time mono">Total {fmtDuration(total)}</span>
           </header>
           <ul className="garments">
@@ -70,6 +73,7 @@ export default function JobDetail({ job }) {
                   <div className="garment-row">
                     <input className="garment-label" value={g.label} aria-label="Garment name"
                       onChange={(e) => actions.renameGarment(job.id, g.id, e.target.value)} />
+                    <GarmentPrice job={job} garment={g} />
                     <span className="garment-time mono">{fmtDuration(ms)}</span>
                   </div>
                   <div className="bar" title={`${Math.round((ms / Math.max(total, 1)) * 100)}% of job time`}>
@@ -119,7 +123,11 @@ export default function JobDetail({ job }) {
               );
             })}
           </ul>
-          <button className="btn small ghost" onClick={() => actions.addGarment(job.id)}>+ Add garment</button>
+          <div className="garment-footer">
+            <button className="btn small ghost" onClick={() => actions.addGarment(job.id)}>+ Add garment</button>
+            <span className="job-total">Job total <PriceEditor job={job} size="large" /></span>
+          </div>
+          <p className="muted small">Price each garment, or leave them blank and set one price for the whole job.</p>
           {job.garments.length > 1 && times[longest] > 0 && (
             <p className="muted small">Longest: <strong>{job.garments[longest].label}</strong> ({fmtDuration(times[longest], false)}, {Math.round((times[longest] / total) * 100)}% of job time)</p>
           )}
@@ -127,7 +135,7 @@ export default function JobDetail({ job }) {
 
         <div className="detail-side">
           <section className="card">
-            <header className="card-head"><h2>Work</h2>{job.price !== '' && job.price != null && <strong>{money(job.price)}</strong>}</header>
+            <header className="card-head"><h2>Work</h2><PriceEditor job={job} /></header>
             <p className="pre">{job.description}</p>
             {job.instructions && <><h3>Special instructions</h3><p className="pre instructions">{job.instructions}</p></>}
           </section>

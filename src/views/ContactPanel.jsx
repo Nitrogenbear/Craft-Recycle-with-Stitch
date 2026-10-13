@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, useApp } from '../ui.jsx';
+import { Modal, PriceEditor, useApp } from '../ui.jsx';
 import { fmtDateTime, fmtDuration, garmentMs, jobMs, waNumber } from '../util.js';
 
 const QUICK_NOTES = ['Left voicemail', 'Sent text', 'Sent WhatsApp', 'Emailed', 'Spoke — collecting soon', 'No answer'];
@@ -15,7 +15,9 @@ export default function ContactPanel({ jobId, garmentId, onClose }) {
   const allDone = job.garments.every((g) => g.done);
   const remaining = job.garments.filter((g) => !g.done).length;
   const first = job.client.name.split(' ')[0];
-  const message = `Hi ${first}, your ${job.service.toLowerCase()} job (${job.ticket}) is ready to collect from Craft, Recycle with Stitch. Let me know when suits you. Thanks, Carla`;
+  const hasPrice = job.price !== '' && job.price != null;
+  const cost = hasPrice ? ` The total is £${Number(job.price).toFixed(2)}.` : '';
+  const message = `Hi ${first}, your ${job.service.toLowerCase()} job (${job.ticket}) is ready to collect from Craft, Recycle with Stitch.${cost} Let me know when suits you. Thanks, Carla`;
 
   const copy = async (text, what) => {
     try {
@@ -52,6 +54,10 @@ export default function ContactPanel({ jobId, garmentId, onClose }) {
 
       <div className="contact-hero">
         <div className="contact-name">{job.client.name} <span className="muted">{job.ticket}</span></div>
+        <div className="contact-price">
+          {hasPrice ? 'To pay:' : 'No price yet —'} <PriceEditor job={job} size="large" />
+          {!hasPrice && <div className="muted small">Add it and it’s included in the text/email message.</div>}
+        </div>
         <div className="contact-phone">
           <a href={`tel:${job.client.phone}`}>{job.client.phone}</a>
           <button className="btn small" onClick={() => copy(job.client.phone, 'phone')}>{copied === 'phone' ? '✓ Copied' : 'Copy'}</button>

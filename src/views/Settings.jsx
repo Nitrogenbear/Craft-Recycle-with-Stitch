@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Field, useApp } from '../ui.jsx';
-import { ALL_COLUMNS, migrate } from '../store.js';
+import { ALL_COLUMNS, listBackups, migrate, readBackup } from '../store.js';
 import { jobRows, summaryRows, timeLogRows, toCSV } from '../reports.js';
 import * as sheets from '../sheets.js';
 import { addDaysISO, download, fmtDateTime, startOfWeekISO, todayISO } from '../util.js';
@@ -9,7 +9,7 @@ import { demoState } from '../demo.js';
 const EXPORT_COLS = ['Job #', 'Client', 'Phone', 'Email', 'Start Date', 'Due Date', 'End Date', 'Service Type', 'Garments', 'Description', 'Time Spent', 'Hours (decimal)', 'Cost', 'Notes'];
 
 export default function Settings() {
-  const { state, actions, syncing } = useApp();
+  const { state, actions, syncing, sync } = useApp();
   const s = state.settings;
   const today = todayISO();
   const [logFrom, setLogFrom] = useState(startOfWeekISO(today));
@@ -75,6 +75,8 @@ export default function Settings() {
   return (
     <div className="settings-page">
       <h1>Settings & export</h1>
+
+      <SyncCard />
 
       <section className="card">
         <header className="card-head"><h2>Export</h2></header>
@@ -152,11 +154,16 @@ export default function Settings() {
 
       <section className="card">
         <header className="card-head"><h2>Backup & restore</h2></header>
-        <p className="muted">All data is stored on this device in the browser. Download a backup regularly (and before clearing browser data or switching device).</p>
+        <p className="muted">
+          Your data is saved on this device{sync.configured && sync.status !== 'signed-out' && sync.status !== 'off' ? ' and in the cloud (sync)' : ''}.
+          Updating the app never deletes it. The app also keeps an automatic copy for each of the last 7 days you used it.
+          Downloading a backup file now and then is a good extra safeguard.
+        </p>
         <div className="btn-row">
           <button className="btn" onClick={backup}>Download full backup (.json)</button>
-          <label className="btn">Restore from backup…<input type="file" accept="application/json,.json" hidden onChange={restore} /></label>
+          <label className="btn">Restore from backup file…<input type="file" accept="application/json,.json" hidden onChange={restore} /></label>
         </div>
+        <DailyBackups />
       </section>
 
       <section className="card">
@@ -187,5 +194,96 @@ export default function Settings() {
         )}
       </section>
     </div>
+  );
+}
+
+function SyncCard() {
+  const { sync } = useApp();
+  const [newMember, setNewMember] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!sync.configured) {
+    return (
+      <section className="card">
+        <header className="card-head"><h2>Sync between devices</h2><span className="tag">Not set up</span></header>
+        <p className="muted">Cloud sync isn’t switched on yet. Once it is, sign in here on each phone and tablet and they’ll share the same jobs.</p>
+      </section>
+    );
+  }
+  const label = {
+    synced: ['green', 'Up to date'], pending: ['yellow', `Sending ${sync.pendingCount} change(s)…`], connecting: ['', 'Connecting…'],
+    offline: ['yellow', 'Offline — changes saved on this device, will sync later'], 'signed-out': ['', 'Signed out'],
+    'not-member': ['red', 'No access'], error: ['red', 'Problem syncing'],
+  }[sync.status] || ['', sync.status];
+
+  const run = async (fn) => {
+    setBusy(true);
+    try { await fn(); } catch (e) { alert(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <section className="card">
+      <header className="card-head"><h2>Sync between devices</h2><span className={`tag ${label[0]}`}>{label[1]}</span></header>
+      {!sync.user ? (
+        <>
+          <p className="muted">Sign in with Carla’s Google account on each phone and tablet. Jobs, tasks and timers then stay the same everywhere, and are kept safely online. Jobs already on this device are added, not replaced.</p>
+          <button className="btn primary" onClick={() => run(sync.signIn)} disabled={busy}>Sign in with Google</button>
+        </>
+      ) : (
+        <>
+          <p>Signed in as <strong>{sync.user.email}</strong></p>
+          {sync.status === 'not-member' && (
+            <p className="banner purple">This Google account hasn’t been given access. Ask Carla to add <strong>{sync.user.email}</strong> below on a device that’s already syncing, then reopen the app.</p>
+          )}
+          {sync.error && sync.status === 'error' && <p className="red-text small">{sync.error}</p>}
+          {sync.members.length > 0 && (
+            <>
+              <h3>People who can see these jobs</h3>
+              <ul className="members">
+                {sync.members.map((m) => (
+                  <li key={m}>
+                    {m}
+                    {sync.members.length > 1 && m !== sync.user.email.toLowerCase() && (
+                      <button className="icon-btn" title="Remove access" onClick={() => confirm(`Remove ${m}?`) && run(() => sync.setMemberList(sync.members.filter((x) => x !== m)))}>✕</button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <form className="inline-form" onSubmit={(e) => { e.preventDefault(); const em = newMember.trim(); if (em) run(async () => { await sync.setMemberList([...sync.members, em]); setNewMember(''); }); }}>
+                <input type="email" value={newMember} onChange={(e) => setNewMember(e.target.value)} placeholder="Add a Google account email (e.g. an assistant)" />
+                <button className="btn" disabled={busy || !newMember.trim()}>Add</button>
+              </form>
+            </>
+          )}
+          <div className="btn-row" style={{ marginTop: 12 }}>
+            <button className="btn ghost small" onClick={() => confirm('Stop syncing on this device? Jobs already here stay on this device.') && run(sync.signOut)}>Sign out on this device</button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function DailyBackups() {
+  const { actions, sync } = useApp();
+  const [list, setList] = useState(null);
+  useEffect(() => { listBackups().then(setList).catch(() => setList([])); }, []);
+  if (!list || !list.length) return null;
+  const restore = async (b) => {
+    if (!confirm(`Go back to the copy from ${b.date} (${b.jobs} jobs, ${b.tasks} tasks)? Changes made since then will be undone${sync?.user ? ' on every synced device' : ''}.`)) return;
+    const data = await readBackup(b.key);
+    if (data) { actions.replaceState(migrate(data)); actions.toast(`Restored the copy from ${b.date}`, 'ok'); }
+  };
+  return (
+    <>
+      <h3>Automatic daily copies on this device</h3>
+      <ul className="members">
+        {list.map((b) => (
+          <li key={b.key}>
+            <span>{b.date} · {b.jobs} jobs, {b.tasks} tasks</span>
+            <button className="btn small ghost" onClick={() => restore(b)}>Restore</button>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }

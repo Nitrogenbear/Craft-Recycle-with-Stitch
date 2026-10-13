@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { DeadlineTag, Empty, StatusPill, useApp, useNow } from '../ui.jsx';
+import { DeadlineTag, Empty, PriceEditor, StatusPill, useApp, useNow } from '../ui.jsx';
 import { SERVICES, STATUSES, deadlineState, fmtDate, fmtDuration, isRunning, jobMs } from '../util.js';
 
 const VIEWS = [
@@ -19,6 +19,7 @@ const COLS = [
   ['dueDate', 'Hand-back'],
   ['finishedDate', 'Finished'],
   ['status', 'Status'],
+  ['price', 'Price'],
   ['time', 'Time'],
 ];
 
@@ -59,6 +60,7 @@ export default function Jobs({ params }) {
         case 'garments': return j.garments.length;
         case 'time': return jobMs(j, now);
         case 'status': return STATUSES.indexOf(j.status);
+        case 'price': return j.price === '' || j.price == null ? -1 : Number(j.price);
         default: return j[sort.key] || (sort.dir > 0 ? '￿' : '');
       }
     };
@@ -118,6 +120,7 @@ export default function Jobs({ params }) {
                 <td data-label="Hand-back">{fmtDate(j.dueDate)} <DeadlineTag job={j} /></td>
                 <td data-label="Finished">{fmtDate(j.finishedDate)}</td>
                 <td data-label="Status"><StatusPill status={j.status} /></td>
+                <td data-label="Price"><PriceEditor job={j} /></td>
                 <td data-label="Time" className="mono">{fmtDuration(jobMs(j, now), false)}</td>
               </tr>
             ))}

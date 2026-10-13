@@ -1,4 +1,4 @@
-import { DeadlineTag, Empty, StatusPill, useApp, useNow } from '../ui.jsx';
+import { DeadlineTag, Empty, PriceEditor, StatusPill, useApp, useNow } from '../ui.jsx';
 import { avgTurnaround } from '../reports.js';
 import { addDaysISO, deadlineState, fmtDate, fmtDuration, isRunning, jobMs, startOfWeekISO, todayISO } from '../util.js';
 import TaskList from './TaskList.jsx';
@@ -103,6 +103,7 @@ export default function Dashboard() {
                         <strong>{j.client.name}</strong> <span className="muted">{j.ticket}</span>
                         <div className="muted small">{lastNote ? `${lastNote.note}` : 'Not contacted yet'}</div>
                       </a>
+                      <PriceEditor job={j} />
                       <button className="btn small" onClick={() => actions.openContact(j.id)}>📞 Contact</button>
                       <button className="btn small ghost" onClick={() => actions.setStatus(j.id, 'Completed')} title="Mark as collected">✓ Collected</button>
                     </li>

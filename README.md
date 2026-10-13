@@ -20,7 +20,18 @@ npm run preview    # serve the production build locally
 After the first visit, a service worker caches the app so it still opens without internet.
 On a tablet, use **Add to Home Screen** so it opens like an app.
 
-> Data lives **per browser, per device**. Use *Settings → Download full backup* regularly. The Google Sheet is a second copy for reporting, not a full backup.
+> Data is saved on each device, and (once sync is set up) in Firebase so phones and tablets share it.
+> Updating the app never deletes data. If stored data can't be read, the app refuses to save rather than overwrite it,
+> and it keeps an automatic copy for each of the last 7 days (Settings → Backup & restore).
+
+## Sync between devices (Firebase)
+
+`src/sync.js` syncs jobs, tasks and shared settings through Firestore. Each job is one document; devices only
+download documents changed since they last synced, and work offline in between. Sign-in is with Google.
+Setup (once): create a Firebase project, enable **Authentication → Google** and **Firestore**, add
+`nitrogenbear.github.io` to Authentication's authorised domains, paste the web app config into
+`src/firebaseConfig.js`, and publish `firestore.rules` with `OWNER_EMAIL` replaced by Carla's Google address.
+Further people (an assistant, a second account) are added in the app under **Settings → Sync between devices**.
 
 ## What's in it
 
